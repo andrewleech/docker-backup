@@ -176,9 +176,12 @@ func createContainer(backup Backup) (string, error) {
 	}
 	// io.Copy(os.Stdout, reader)
 
+	var nameparts = strings.Split(backup.Name, "/")
+	var name = nameparts[len(nameparts)-1]
+	
 	resp, err := cli.ContainerCreate(ctx, backup.Config, &container.HostConfig{
 		PortBindings: backup.PortMap,
-	}, nil, "")
+	}, nil, name)
 	if err != nil {
 		return "", err
 	}
