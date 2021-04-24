@@ -164,7 +164,10 @@ func restore(filename string) error {
 }
 
 func createContainer(backup Backup) (string, error) {
-	fmt.Println("Restoring Container with hostname:", backup.Config.Hostname)
+	var nameparts = strings.Split(backup.Name, "/")
+	var name = nameparts[len(nameparts)-1]
+
+	fmt.Println("Restoring Container:", name)
 	_, _, err := cli.ImageInspectWithRaw(ctx, backup.Config.Image)
 	if err != nil {
 		fmt.Println("Pulling Image:", backup.Config.Image)
@@ -174,9 +177,6 @@ func createContainer(backup Backup) (string, error) {
 		}
 	}
 	// io.Copy(os.Stdout, reader)
-
-	var nameparts = strings.Split(backup.Name, "/")
-	var name = nameparts[len(nameparts)-1]
 
 	resp, err := cli.ContainerCreate(ctx, backup.Config, backup.HostConfig, nil, name)
 	if err != nil {
