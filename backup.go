@@ -15,7 +15,6 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/go-connections/nat"
 	"github.com/kennygrant/sanitize"
 	"github.com/spf13/cobra"
 )
@@ -23,10 +22,10 @@ import (
 // Backup is used to gather all of a container's metadata, so we can encode it
 // as JSON and store it
 type Backup struct {
-	Name    string
-	Config  *container.Config
-	PortMap nat.PortMap
-	Mounts  []types.MountPoint
+	Name       string
+	Config     *container.Config
+	Mounts     []types.MountPoint
+	HostConfig *container.HostConfig
 }
 
 var (
@@ -157,10 +156,10 @@ func backup(ID string) error {
 
 	paths = []string{}
 	backup := Backup{
-		Name:    conf.Name,
-		PortMap: conf.HostConfig.PortBindings,
-		Config:  conf.Config,
-		Mounts:  conf.Mounts,
+		Name:       conf.Name,
+		Config:     conf.Config,
+		HostConfig: conf.HostConfig,
+		Mounts:     conf.Mounts,
 	}
 
 	filename := sanitize.Path(fmt.Sprintf("%s-%s", conf.Config.Image, ID))

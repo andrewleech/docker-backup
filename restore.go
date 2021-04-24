@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 )
 
@@ -178,10 +177,8 @@ func createContainer(backup Backup) (string, error) {
 
 	var nameparts = strings.Split(backup.Name, "/")
 	var name = nameparts[len(nameparts)-1]
-	
-	resp, err := cli.ContainerCreate(ctx, backup.Config, &container.HostConfig{
-		PortBindings: backup.PortMap,
-	}, nil, name)
+
+	resp, err := cli.ContainerCreate(ctx, backup.Config, backup.HostConfig, nil, name)
 	if err != nil {
 		return "", err
 	}
