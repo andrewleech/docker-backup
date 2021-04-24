@@ -155,6 +155,30 @@ func backup(ID string) error {
 	fmt.Printf("Creating backup of %s (%s, %s)\n", conf.Name[1:], conf.Config.Image, conf.ID[:12])
 
 	paths = []string{}
+
+	var imageName = conf.Config.Image
+	if !strings.Contains(imageName, ":") {
+		// No tag on image used to start container, find the real image
+		images, err := cli.ImageList(ctx, types.ImageListOptions{})
+		if err == nil {
+			for _, image := range images {
+				if strings.Contains(conf.Image, image.ID) {
+					if len(image.RepoTags) > 0 {
+						found := image.RepoTags[0]
+						for _, tag := range image.RepoTags { // use closer matching tag if it exists
+							if strings.Contains(tag, imageName) {
+								found = tag
+								break
+							}
+						}
+						conf.Config.Image = found
+						break
+					}
+				}
+			}
+		}
+	}
+
 	backup := Backup{
 		Name:       conf.Name,
 		Config:     conf.Config,
