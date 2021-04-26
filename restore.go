@@ -10,11 +10,13 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
+	volumetypes "github.com/docker/docker/api/types/volume"
 	"github.com/spf13/cobra"
 )
 
 var (
-	optStart = false
+	optStart   = false
+	optReplace = false
 
 	restoreCmd = &cobra.Command{
 		Use:   "restore <backup file>",
@@ -64,6 +66,11 @@ func restoreTar(filename string) error {
 
 	var backup Backup
 	err = json.Unmarshal(b, &backup)
+	if err != nil {
+		return err
+	}
+
+	err = createVolumes(backup)
 	if err != nil {
 		return err
 	}
@@ -152,6 +159,11 @@ func restore(filename string) error {
 		return err
 	}
 
+	err = createVolumes(backup)
+	if err != nil {
+		return err
+	}
+
 	id, err := createContainer(backup)
 	if err != nil {
 		return err
@@ -159,6 +171,106 @@ func restore(filename string) error {
 
 	if optStart {
 		return startContainer(id)
+	}
+	return nil
+}
+
+func createVolumes(backup Backup) error {
+	if len(backup.Volumes) > 0 {
+		for _, volDef := range backup.Volumes {
+
+			_, err := cli.VolumeInspect(ctx, volDef.Name)
+			if err != nil {
+				if optReplace {
+					fmt.Println("Volume already exists, replacing:", volDef.Name)
+				} else {
+					fmt.Println("Volume already exists (run with --replace to overwrite):", volDef.Name)
+					continue
+				}
+			} else {
+				fmt.Println("Restoring Volume:", volDef.Name)
+			}
+
+			vol, err := cli.VolumeCreate(ctx, volumetypes.VolumeCreateBody{
+				Driver: "local",
+				Name:   volDef.Name,
+			})
+			if err != nil {
+				return err
+			}
+
+			bindNeeded := true
+			for _, bind := range backup.HostConfig.Binds {
+				if strings.HasPrefix(bind, volDef.Name+":") {
+					// this volume is already defined in HostConfig
+					bindNeeded = false
+				}
+			}
+			if bindNeeded {
+				// Add the new volume definition to HostConfig so container is created with this (named) volume
+				rw := ""
+				for _, mountDef := range backup.Mounts {
+					if mountDef.Name == volDef.Name {
+						if mountDef.RW {
+							rw = ":rw"
+						} else {
+							rw = ":ro"
+						}
+						break
+					}
+				}
+
+				backup.HostConfig.Binds = append(backup.HostConfig.Binds, volDef.Name+":"+volDef.Destination+rw)
+			}
+
+			tarfile, err := os.Open(volDef.Tar)
+			if err != nil {
+				return err
+			}
+			defer tarfile.Close()
+		
+			tr := tar.NewReader(tarfile)
+			dest := vol.Mountpoint
+
+			for {
+				th, err := tr.Next()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return err
+				}
+		
+				path := th.Name
+				fmt.Println("Restoring:", path)
+				for k, v := range tt {
+					if strings.HasPrefix(path, k) {
+						path = v + path[len(k):]
+					}
+				}
+		
+				if th.Typeflag == tar.TypeDir {
+					if err := os.MkdirAll(path, os.FileMode(th.Mode)); err != nil {
+						return err
+					}
+				} else {
+					file, err := os.Create(path)
+					if err != nil {
+						return err
+					}
+					if _, err := io.Copy(file, tr); err != nil {
+						return err
+					}
+					file.Close()
+				}
+				if err := os.Chmod(path, os.FileMode(th.Mode)); err != nil {
+					return err
+				}
+				if err := os.Chown(path, th.Uid, th.Gid); err != nil {
+					return err
+				}
+
+		}
 	}
 	return nil
 }
@@ -177,6 +289,9 @@ func createContainer(backup Backup) (string, error) {
 		}
 	}
 	// io.Copy(os.Stdout, reader)
+
+	// re-created volumes are now all named, so are specified in HostConfig instead
+	backup.Config.Volumes = nil
 
 	resp, err := cli.ContainerCreate(ctx, backup.Config, backup.HostConfig, nil, name)
 	if err != nil {
@@ -229,5 +344,6 @@ func startContainer(id string) error {
 
 func init() {
 	restoreCmd.Flags().BoolVarP(&optStart, "start", "s", false, "start restored container")
+	restoreCmd.Flags().BoolVarP(&optReplace, "replace", "r", false, "replace existing container/volumes with same name")
 	RootCmd.AddCommand(restoreCmd)
 }
