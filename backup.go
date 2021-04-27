@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/kennygrant/sanitize"
 	"github.com/spf13/cobra"
+	"github.com/zloylos/grsync"
 )
 
 // Backup is used to gather all of a container's metadata, so we can encode it
@@ -31,6 +32,7 @@ type Backup struct {
 var (
 	optLaunch  = ""
 	optTar     = false
+	optOut     = false
 	optAll     = false
 	optStopped = false
 	optExclude = []string{}
@@ -235,29 +237,69 @@ func backup(ID string) error {
 		return err
 	}
 
-    paths = []string{}
-	for _, m := range backupFiles {
-		// fmt.Printf("Mount (type %s) %s -> %s\n", m.Type, m.Source, m.Destination)
-		err := filepath.Walk(m.Source, collectFile)
+	if optOut {
+		outDir := filename + ".backup"
+		for _, m := range backupFiles {
+			source := m.Source
+			dest := outDir + source
+			if info, err := os.Stat(source); err == nil && info.IsDir() {
+				source += "/"
+				dest += "/"
+			}
+			fmt.Println("Backing up '" + source + "' -> './" + dest + "'")
+			task := grsync.NewTask(
+				source,
+				dest,
+				grsync.RsyncOptions{},
+			)
+
+			go func() {
+				for {
+					state := task.State()
+					fmt.Printf(
+						"\rprogress: %.2f / rem. %d / tot. %d",
+						state.Progress,
+						state.Remain,
+						state.Total,
+					)
+					time.Sleep(time.Second)
+				}
+			}()
+
+			err = task.Run()
+			if err != nil {
+				fmt.Println(task.Log().Stderr)
+				return err
+			}
+			fmt.Printf("\r")
+		}
+
+	} else {
+
+		paths = []string{}
+		for _, m := range backupFiles {
+			// fmt.Printf("Mount (type %s) %s -> %s\n", m.Type, m.Source, m.Destination)
+			err := filepath.Walk(m.Source, collectFile)
+			if err != nil {
+				return err
+			}
+		}
+
+		filelist, err := os.Create(filename + ".backup.files")
 		if err != nil {
 			return err
 		}
-	}
+		defer filelist.Close()
 
-	filelist, err := os.Create(filename + ".backup.files")
-	if err != nil {
-		return err
-	}
-	defer filelist.Close()
-
-	_, err = filelist.WriteString(filename + ".backup.json\n")
-	if err != nil {
-		return err
-	}
-	for _, s := range paths {
-		_, err := filelist.WriteString(s + "\n")
+		_, err = filelist.WriteString(filename + ".backup.json\n")
 		if err != nil {
 			return err
+		}
+		for _, s := range paths {
+			_, err := filelist.WriteString(s + "\n")
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -299,6 +341,7 @@ func backupAll() error {
 func init() {
 	backupCmd.Flags().StringVarP(&optLaunch, "launch", "l", "", "launch external program with file-list as argument")
 	backupCmd.Flags().BoolVarP(&optTar, "tar", "t", false, "create tar backups")
+	backupCmd.Flags().BoolVarP(&optOut, "outdir", "o", false, "copy all files to folder")
 	backupCmd.Flags().BoolVarP(&optAll, "all", "a", false, "backup all running containers")
 	backupCmd.Flags().BoolVarP(&optStopped, "stopped", "s", false, "in combination with --all: also backup stopped containers")
 	backupCmd.Flags().StringArrayVarP(&optExclude, "exclude", "e", []string{}, "exclude file paths that start with this, can use multiple times")
