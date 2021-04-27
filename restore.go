@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	optStart = false
+	optStart   = false
+	optReplace = false
 
 	restoreCmd = &cobra.Command{
 		Use:   "restore <backup file>",
@@ -176,7 +177,23 @@ func createContainer(backup Backup) (string, error) {
 			return "", err
 		}
 	}
-	// io.Copy(os.Stdout, reader)
+
+	_, err = cli.ContainerInspect(ctx, name)
+	if err == nil {
+		if optReplace {
+			fmt.Println("Removing existing Container with name:", name)
+			err = cli.ContainerStop(ctx, name, nil)
+			if err != nil {
+				return "", err
+			}
+			err = cli.ContainerRemove(ctx, name, types.ContainerRemoveOptions{})
+			if err != nil {
+				return "", err
+			}
+		} else {
+			return "", fmt.Errorf("The container name '" + name + "' is already in use, rename existing container or run restore with --replace to overwrite")
+		}
+	}
 
 	resp, err := cli.ContainerCreate(ctx, backup.Config, backup.HostConfig, nil, name)
 	if err != nil {
@@ -229,5 +246,6 @@ func startContainer(id string) error {
 
 func init() {
 	restoreCmd.Flags().BoolVarP(&optStart, "start", "s", false, "start restored container")
+	restoreCmd.Flags().BoolVarP(&optReplace, "replace", "r", false, "replace existing container with same name")
 	RootCmd.AddCommand(restoreCmd)
 }
